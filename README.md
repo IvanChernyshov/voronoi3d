@@ -2,103 +2,180 @@
 
 Starter repository for the 3D Voronoi project.
 
-`voronoi3d` ships a Python extension (via **pybind11** + **CMake** + **scikit-build-core**) and a small Python API.  
-Tested on **Windows (MSVC)** with **Python 3.10**.
+## Installation
+
+The easiest way to get a working developer setup is to use the OS-specific helper scripts in `scripts/`.
+Each script assumes **you already created and activated a Python 3.10+ environment** (e.g. `python -m venv .venv` then activate).
+
+These scripts will:
+- install required build tools (CMake, Ninja, compiler toolchains),
+- clone this repository with submodules,
+- install the package in editable mode with dev extras (`pip install -e ".[dev]"`),
+- (optionally) run tests to verify the build.
+
+> We currently provide helper scripts for **Windows**, **Linux**, and **macOS**. If you prefer not to use the scripts, see the **Manual install** section below.
 
 ---
 
-## Requirements (Windows)
+### Windows (PowerShell, Visual Studio Build Tools installed)
 
-- **Python** 3.10 (conda recommended)
-- **Visual Studio 2022 Build Tools** with:
-  - *MSVC v143* C++ toolset
-  - *Windows 10/11 SDK*
-- **Git** (for submodules)
-- **CMake ≥ 3.22** (auto-installed via pip if missing)
+> Assumes you already installed **Visual Studio 2022 Build Tools** (with C++ build tools & Windows SDK) and activated a Python 3.10+ environment in the same PowerShell session.
 
-> Tip: You can build from a normal PowerShell/CMD as long as VS Build Tools are installed.
+Download & run the setup script:
+
+```powershell
+$script = "voronoi3d_win_setup.ps1"
+Invoke-WebRequest -UseBasicParsing `
+  -Uri https://raw.githubusercontent.com/IvanChernyshov/voronoi3d/main/scripts/voronoi3d_win_setup.ps1 `
+  -OutFile $script
+
+# Basic run (clones to ./voronoi3d, installs dev deps, runs tests)
+.oronoi3d_win_setup.ps1
+
+# Options:
+#   -Branch <name>   pick a branch (default: main)
+#   -Dir <path>      clone directory (default: ./voronoi3d)
+#   -SkipTests       skip pytest
+#   -Generator <g>   CMake generator (default: "Visual Studio 17 2022")
+.oronoi3d_win_setup.ps1 -Branch dev -Dir .oro-dev -SkipTests
+```
 
 ---
 
-## Installation — fresh clone
+### Linux (Debian/Ubuntu, Fedora/RHEL, Arch/Manjaro, WSL)
+
+> Assumes a Python 3.10+ environment is already activated. The script auto-detects the distro and installs compilers, CMake, Ninja, Git, and OpenMP support using your package manager. It also adds `-fPIC` on Linux to ensure the C++ objects are linkable into the Python extension.
+
+Download & run:
 
 ```bash
-# 1) Clone with submodules
-git clone --recursive <your-repo-url> voronoi3d
+curl -fsSL -o voronoi3d_linux_setup.sh   https://raw.githubusercontent.com/IvanChernyshov/voronoi3d/main/scripts/voronoi3d_linux_setup.sh
+chmod +x voronoi3d_linux_setup.sh
+
+# Basic run (clones to ./voronoi3d, installs dev deps, runs tests)
+./voronoi3d_linux_setup.sh
+
+# Options:
+#   --branch <name>   pick a branch (default: main)
+#   --dir <path>      clone directory (default: ./voronoi3d)
+#   --no-test         skip pytest
+./voronoi3d_linux_setup.sh --branch dev --dir ./voro-dev
+```
+
+> **WSL (Ubuntu)** is supported and works the same way.
+
+---
+
+### macOS (Apple Silicon & Intel)
+
+> Assumes a Python 3.10+ environment is already activated. The script uses **Homebrew** to install CMake/Ninja/Git. macOS does not ship OpenMP by default; pass `--with-openmp` to install Homebrew `llvm` and build with OpenMP.
+
+Download & run:
+
+```bash
+curl -fsSL -o voronoi3d_macos_setup.sh   https://raw.githubusercontent.com/IvanChernyshov/voronoi3d/main/scripts/voronoi3d_macos_setup.sh
+chmod +x voronoi3d_macos_setup.sh
+
+# Basic run (clones to ./voronoi3d, installs dev deps, runs tests)
+./voronoi3d_macos_setup.sh
+
+# With OpenMP (installs Homebrew llvm; sets CC/CXX & flags so CMake finds OpenMP)
+./voronoi3d_macos_setup.sh --with-openmp
+
+# Options:
+#   --branch <name>   pick a branch (default: main)
+#   --dir <path>      clone directory (default: ./voronoi3d)
+#   --no-test         skip pytest
+```
+
+---
+
+## Manual install (all platforms)
+
+If you prefer to set things up yourself:
+
+1) **Prerequisites**
+   - Python **3.10+**
+   - CMake **3.22+**
+   - A C++20 compiler (MSVC 2022 / GCC 10+ / Clang 14+)
+   - Git
+   - (Optional) OpenMP toolchain:
+     - Windows (MSVC): `/openmp` is enabled automatically if available
+     - Linux: `libgomp` is usually present with GCC
+     - macOS: install Homebrew `llvm` and configure OpenMP flags as needed
+
+2) **Clone with submodules**
+```bash
+git clone --recurse-submodules https://github.com/IvanChernyshov/voronoi3d.git
 cd voronoi3d
-
-# If you forgot --recursive:
-# git submodule update --init --recursive
-
-# 2) Create and activate a clean environment
-conda create -n voro python=3.10 -y
-conda activate voro
-
-# 3) Build dependencies (CMake will be installed if needed)
-python -m pip install -U pip
-python -m pip install -U scikit-build-core pybind11 cmake
-
-# 4) Build and install in editable mode
-python -m pip install -e .
 ```
 
-### Verify
-
+3) **Install (editable) with dev extras**
 ```bash
-python -c "import voronoi3d, voronoi3d._core; print('voronoi3d OK')"
+pip install -U pip
+pip install -e ".[dev]"
 ```
 
-(Optional) run tests:
-
+4) **Run tests**
 ```bash
-python -m pip install pytest
 pytest -q
 ```
 
+> If you run into linker errors on Linux about `-fPIC`, ensure position-independent code is enabled (this project does so via CMake) and you are using a recent compiler. Cleaning caches (`pip uninstall voronoi3d`, remove any temp build dirs) can also help.
+
 ---
 
-## Installation — already cloned repo
+## What gets built?
 
-```bash
-cd <path-to>/voronoi3d
+- A Python extension module `_core` (via CMake + pybind11 + scikit-build-core)
+- Optional OpenMP acceleration is enabled automatically if the toolchain supports it.
 
-# Ensure third-party code is present
-git submodule update --init --recursive
+---
 
-conda create -n voro python=3.10 -y
-conda activate voro
+## Development
 
-python -m pip install -U pip
-python -m pip install -U scikit-build-core pybind11 cmake
+- Install dev tools: `pip install -e ".[dev]"`
+- Lint/format: `ruff check .` and `ruff format .`
+- Type check: `mypy python`
+- Run tests: `pytest -q`
+- Pre-commit hooks: `pre-commit install` (then `pre-commit run -a`)
 
-python -m pip install -e .
-python -c "import voronoi3d, voronoi3d._core; print('voronoi3d OK')"
+---
+
+## Project layout
+
+```
+voronoi3d/
+├─ python/                 # Python package sources (tests, examples)
+├─ cpp/
+│  ├─ core/                # pybind11 bindings
+│  ├─ shims/               # adapter sources (e.g., WL wrapper)
+│  ├─ cmake/               # CMake helper fragments (e.g., voro_sources.cmake)
+│  └─ third_party/voro++/  # upstream voro++ (as a submodule)
+├─ scripts/                # convenience install/build scripts (Win/Linux/macOS)
+├─ pyproject.toml          # build configuration
+└─ README.md
 ```
 
 ---
 
 ## Troubleshooting
 
-- **Missing MSVC/SDK:** Install *Visual Studio 2022 Build Tools* with the C++ workload and Windows SDK.
-- **Submodule not found:**  
-  `git submodule update --init --recursive`
-- **Stale build artifacts:** If you switch compilers/Python versions, reinstall in a fresh env:
-  ```bash
-  pip uninstall -y voronoi3d
-  conda remove -n voro --all -y
-  ```
-  then follow the steps above.
+- **Linux: `relocation ... can not be used when making a shared object; recompile with -fPIC`**  
+  Use a recent GCC and ensure PIC is enabled. Our CMake sets PIC on Unix; the Linux script also enforces PIC.
 
----
+- **macOS: OpenMP not found**  
+  Use the macOS script with `--with-openmp` to install Homebrew `llvm` and configure the build with OpenMP.
 
-## Development notes
+- **Submodule missing (`voro++.hh` not found)**  
+  Clone with submodules or run: `git submodule update --init --recursive`.
 
-- The C++ core uses OpenMP automatically if available.
-- The Voro++ sources are vendored under `cpp/third_party/voro++`.
-- The Python extension module is built as `voronoi3d/_core.*.pyd`.
+- **Stale CMake cache**  
+  When switching compilers/generators, remove previous temp build dirs (created by scikit-build-core) and reinstall:  
+  `pip uninstall voronoi3d` then `pip install -e ".[dev]"`.
 
 ---
 
 ## License
 
-TBD.
+MIT (see `LICENSE`).
