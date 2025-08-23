@@ -4,7 +4,7 @@ This project bundles **Voro++** as a Git submodule at `cpp/third_party/voro++`.
 
 - **Upstream:** https://github.com/chr1shr/voro
 
-- **Pinned commit:** `<PIN_COMMIT_HASH>`.
+- **Pinned commit:** `2cb6cefc690be1c653bfb8e65559ee8441c0b21f`.
 
 - **License:** BSD-3-Clause (LBNL variant). See `LICENSES/VORO_PLUSPLUS` (verbatim copy of upstream LICENSE).
 

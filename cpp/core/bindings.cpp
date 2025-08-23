@@ -23,7 +23,7 @@ static CellsResult compute_cells_impl(py::array_t<double, py::array::c_style | p
     if (bounds.ndim() != 2 || bounds.shape(0) != 3 || bounds.shape(1) != 2) {
         throw std::invalid_argument("bounds must have shape (3,2) = [[xmin,xmax],[ymin,ymax],[zmin,zmax]]");
     }
-    const ssize_t N = points.shape(0);
+    const py::ssize_t N = points.shape(0);
     auto P = points.unchecked<2>();
     auto B = bounds.unchecked<2>();
 
@@ -39,7 +39,7 @@ static CellsResult compute_cells_impl(py::array_t<double, py::array::c_style | p
     voro::container con(xmin, xmax, ymin, ymax, zmin, zmax, nx, ny, nz, false, false, false, 8);
 
     // Insert particles
-    for (ssize_t i = 0; i < N; ++i) {
+    for (py::ssize_t i = 0; i < N; ++i) {
         double x = P(i,0), y = P(i,1), z = P(i,2);
         if (!(x > xmin && x < xmax && y > ymin && y < ymax && z > zmin && z < zmax)) {
             throw std::invalid_argument("Point " + std::to_string(i) + " is outside the box bounds");
