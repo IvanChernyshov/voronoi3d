@@ -1,0 +1,8 @@
+{
+  "files.eol": "\n",
+  "cmake.generator": "Ninja",
+  "cmake.configureOnOpen": true,
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["-q"],
+  "python.analysis.typeCheckingMode": "basic"
+}
