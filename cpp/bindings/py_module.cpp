@@ -11,6 +11,7 @@
 #include "../core/polyhedron.hpp"
 #include "../core/tessellate.hpp"
 #include "../core/mesh_builder.hpp"
+#include "../core/tessellate_caps.hpp"
 
 namespace py = pybind11;
 using namespace v3d;
@@ -82,6 +83,8 @@ PYBIND11_MODULE(_core, m) {
             py::dict d;
             d["atom_id"] = c.atom_id;
             d["volume"] = c.volume;
+            d["centroid"] = py::make_tuple(c.centroid.x, c.centroid.y, c.centroid.z);
+            d["centroid"] = py::make_tuple(c.centroid.x, c.centroid.y, c.centroid.z);
             d["vertices"] = vec3_list_to_numpy(c.poly.V);
             py::list faces;
             for(const auto& loop : c.poly.F){
@@ -107,6 +110,7 @@ PYBIND11_MODULE(_core, m) {
             py::dict d;
             d["atom_id"] = c.atom_id;
             d["volume"] = c.volume;
+            d["centroid"] = py::make_tuple(c.centroid.x, c.centroid.y, c.centroid.z);
             d["vertices"] = vec3_list_to_numpy(c.poly.V);
             py::list faces;
             for(const auto& loop : c.poly.F){
@@ -133,7 +137,8 @@ PYBIND11_MODULE(_core, m) {
         std::vector<double> vols; vols.reserve(cells.size());
         std::vector<Vec3> atom_pos = box.pos;
         for(const auto& c : cells){ polys.push_back(c.poly); atom_ids.push_back(c.atom_id); vols.push_back(c.volume); }
-        auto GM = stitch_global(T, polys, atom_ids, vols, atom_pos, cfg);
+        std::vector<Vec3> cents; cents.reserve(cells.size()); for(const auto& c : cells) cents.push_back(c.centroid);
+        auto GM = stitch_global(T, polys, atom_ids, vols, cents, atom_pos, cfg);
         // build Python dict
         py::dict out;
         out["vertices"] = vec3_list_to_numpy(GM.vertices);
@@ -181,6 +186,41 @@ PYBIND11_MODULE(_core, m) {
         }
         py::dict Cdict; Cdict["atom_id"]=Cid; Cdict["volume"]=Cvol; Cdict["centroid"]=Ccent; Cdict["face_ids"]=Cfaces;
         out["cells"] = Cdict;
+        return out;
+    });
+
+
+    py::class_<CapOptions>(m, "CapOptions")
+        .def(py::init<>())
+        .def_readwrite("enabled", &CapOptions::enabled)
+        .def_readwrite("radius", &CapOptions::radius)
+        .def_readwrite("lebedev_order", &CapOptions::lebedev_order)
+        .def_readwrite("surface_atom_ids", &CapOptions::surface_atom_ids)
+        .def_readwrite("auto_surface_margin", &CapOptions::auto_surface_margin);
+
+    m.def("tessellate_pairs_with_caps", [](const BoxContainer& box, const NeighborTable& T, py::array_t<double, py::array::c_style | py::array::forcecast> M_arr, const CapOptions& opt, const Config& cfg){
+        if(M_arr.ndim()!=1) throw std::runtime_error("M must be a 1D float64 array");
+        if((size_t)M_arr.shape(0) != T.i.size()) throw std::runtime_error("M length must equal neighbor table size");
+        std::vector<double> M(T.i.size());
+        auto Mb = M_arr.unchecked<1>();
+        for(py::ssize_t k=0;k<M_arr.shape(0);++k) M[(size_t)k] = Mb(k);
+        auto cells = tessellate_pairs_with_caps(box, T, M, opt, cfg);
+        py::list out;
+        for(const auto& c : cells){
+            py::dict d;
+            d["atom_id"] = c.atom_id;
+            d["volume"] = c.volume;
+            d["centroid"] = py::make_tuple(c.centroid.x, c.centroid.y, c.centroid.z);
+            d["vertices"] = vec3_list_to_numpy(c.poly.V);
+            py::list faces;
+            for(const auto& loop : c.poly.F){
+                py::list L;
+                for(int idx : loop) L.append(idx);
+                faces.append(L);
+            }
+            d["faces"] = faces;
+            out.append(d);
+        }
         return out;
     });
 

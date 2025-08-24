@@ -37,7 +37,6 @@ struct GlobalMesh {
 
 inline std::vector<int> canonical_cycle(const std::vector<int>& loop){
     if(loop.empty()) return loop;
-    // rotate so that smallest vertex id comes first; then choose orientation with lexicographically smaller sequence
     int n = (int)loop.size();
     int minv = loop[0], mini = 0;
     for(int k=1;k<n;k++){ if(loop[k] < minv){ minv = loop[k]; mini = k; } }
@@ -54,7 +53,13 @@ inline Vec3Key key_of(const Vec3& v, double q){
     return Vec3Key{ (long long)std::llround(v.x/q), (long long)std::llround(v.y/q), (long long)std::llround(v.z/q) };
 }
 
-inline GlobalMesh stitch_global(const NeighborTable& T, const std::vector<Polyhedron>& cell_polys, const std::vector<int>& atom_ids, const std::vector<double>& volumes, const std::vector<Vec3>& atom_pos, const Config& cfg){
+inline GlobalMesh stitch_global(const NeighborTable& T,
+                                const std::vector<Polyhedron>& cell_polys,
+                                const std::vector<int>& atom_ids,
+                                const std::vector<double>& volumes,
+                                const std::vector<Vec3>& cell_centroids,
+                                const std::vector<Vec3>& atom_pos,
+                                const Config& cfg){
     GlobalMesh G;
     const double q = std::max(1e-9, cfg.eps_pos*100);
     // 1) Vertex dedup
@@ -93,19 +98,16 @@ inline GlobalMesh stitch_global(const NeighborTable& T, const std::vector<Polyhe
         }
     };
     std::unordered_map<std::vector<int>, int, FaceKeyHash, FaceKeyEq> fmap;
-    // For each cell face, register or find global face id
     for(size_t ci=0; ci<cell_polys.size(); ++ci){
         const auto& P = cell_polys[ci];
         GlobalMeshCell cell;
         cell.atom_id = atom_ids[ci];
         cell.volume = volumes[ci];
-        // centroid as average of vertices (approx)
-        Vec3 c{0,0,0}; for(const auto& v : P.V) c += v; if(!P.V.empty()) c = c / (double)P.V.size(); cell.centroid = c;
+        cell.centroid = cell_centroids[ci];
         for(size_t f=0; f<P.F.size(); ++f){
             std::vector<int> gl;
             gl.reserve(P.F[f].size());
             for(int lv : P.F[f]) gl.push_back(local2global[ci][(size_t)lv]);
-            // remove consecutive duplicates & ensure >=3 unique
             std::vector<int> gl2; gl2.reserve(gl.size());
             for(size_t k=0;k<gl.size();++k){ if(k==0 || gl[k]!=gl[k-1]) gl2.push_back(gl[k]); }
             if(gl2.size()>=3 && gl2.front()==gl2.back()) gl2.pop_back();
@@ -123,32 +125,33 @@ inline GlobalMesh stitch_global(const NeighborTable& T, const std::vector<Polyhe
                     int jj = T.j[(size_t)tag];
                     Fg.i = ii; Fg.j = jj;
                     Fg.img = T.img[(size_t)tag];
-                    // orient normal from i to j
                     Vec3 dir = T.disp[(size_t)tag]; double L = dir.norm(); if(L>0) dir = dir / L; else dir = Vec3{0,0,1};
-                    // compute normal via Newell from canon loop
-                    Vec3 n{0,0,0}; Vec3 cc{0,0,0};
+                    // area & centroid from local attributes if present
+                    if(f < P.face_area.size()) Fg.area = P.face_area[f];
+                    if(f < P.face_centroid.size()) Fg.centroid = P.face_centroid[f];
+                    // orient loop to align with dir
+                    // compute simple normal via Newell on global vertices
+                    Vec3 n{0,0,0};
                     for(size_t k=0;k<canon.size();++k){
                         const Vec3& a = G.vertices[canon[k]];
                         const Vec3& b = G.vertices[canon[(k+1)%canon.size()]];
                         n.x += (a.y - b.y) * (a.z + b.z);
                         n.y += (a.z - b.z) * (a.x + b.x);
                         n.z += (a.x - b.x) * (a.y + b.y);
-                        cc += a;
                     }
-                    double Ln = n.norm(); Vec3 nu = (Ln>0)? n/Ln : Vec3{0,0,1};
+                    double Ln = n.norm();
+                    Vec3 nu = (Ln>0)? n/Ln : Vec3{0,0,1};
                     if(nu.dot(dir) < 0){
-                        // reverse to align
                         std::reverse(Fg.loop.begin(), Fg.loop.end());
                     }
                     Fg.normal_ij = dir;
                 } else {
                     Fg.i = atom_ids[ci]; Fg.j = -1;
                     Fg.img = {0,0,0};
+                    if(f < P.face_area.size()) Fg.area = P.face_area[f];
+                    if(f < P.face_centroid.size()) Fg.centroid = P.face_centroid[f];
                     Fg.normal_ij = Vec3{0,0,1};
                 }
-                // area & centroid (use attributes from local poly if available)
-                if(f < P.face_area.size()) Fg.area = P.face_area[f];
-                if(f < P.face_centroid.size()) Fg.centroid = P.face_centroid[f];
                 G.faces.push_back(std::move(Fg));
                 fmap.emplace(canon, fid);
             } else {
@@ -158,7 +161,7 @@ inline GlobalMesh stitch_global(const NeighborTable& T, const std::vector<Polyhe
         }
         G.cells.push_back(std::move(cell));
     }
-    // 3) Build edges as unique unordered pairs from face loops
+    // 3) Build edges
     std::unordered_map<long long,int> emap; emap.reserve(65536);
     auto pack2 = [](int a, int b)->long long{
         int u = std::min(a,b), v = std::max(a,b);

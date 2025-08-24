@@ -67,6 +67,7 @@ inline Vec3 orthonormal_u(const Vec3& n){
     return u / L;
 }
 
+// exact per-face area/centroid via triangulation; normal via summed cross
 inline void compute_face_attributes(Polyhedron& P){
     P.face_area.resize(P.F.size());
     P.face_centroid.resize(P.F.size());
@@ -74,39 +75,46 @@ inline void compute_face_attributes(Polyhedron& P){
     for(size_t f=0; f<P.F.size(); ++f){
         const auto& loop = P.F[f];
         if(loop.size()<3){ P.face_area[f]=0; P.face_centroid[f]={0,0,0}; P.face_normal[f]={0,0,1}; continue; }
-        // Estimate normal by Newell's method
-        Vec3 n{0,0,0};
-        Vec3 c{0,0,0};
-        for(size_t k=0;k<loop.size();++k){
-            const Vec3& a = P.V[loop[k]];
-            const Vec3& b = P.V[loop[(k+1)%loop.size()]];
-            n.x += (a.y - b.y) * (a.z + b.z);
-            n.y += (a.z - b.z) * (a.x + b.x);
-            n.z += (a.x - b.x) * (a.y + b.y);
-            c += a;
+        const Vec3& v0 = P.V[loop[0]];
+        double area_sum = 0.0;
+        Vec3 centroid_sum{0,0,0};
+        Vec3 nsum{0,0,0};
+        for(size_t k=1; k+1<loop.size(); ++k){
+            const Vec3& v1 = P.V[loop[k]];
+            const Vec3& v2 = P.V[loop[k+1]];
+            Vec3 e1 = v1 - v0, e2 = v2 - v0;
+            Vec3 cr = e1.cross(e2);
+            double tri_area = 0.5 * cr.norm();
+            area_sum += tri_area;
+            centroid_sum += (v0 + v1 + v2) * (tri_area / 3.0);
+            nsum += cr;
         }
-        double L = n.norm();
-        Vec3 nu = (L>0)? n/L : Vec3{0,0,1};
-        P.face_normal[f] = nu;
-        // Build basis
-        Vec3 u = orthonormal_u(nu);
-        Vec3 v = nu.cross(u);
-        // centroid (simple avg)
-        c = c / (double)loop.size();
-        // area via shoelace in UV
-        double area2 = 0.0;
-        for(size_t k=0;k<loop.size();++k){
-            const Vec3& a3 = P.V[loop[k]];
-            const Vec3& b3 = P.V[loop[(k+1)%loop.size()]];
-            Vec3 da = a3 - c; Vec3 db = b3 - c;
-            double ax = da.dot(u), ay = da.dot(v);
-            double bx = db.dot(u), by = db.dot(v);
-            area2 += ax*by - bx*ay;
-        }
-        double area = 0.5*std::fabs(area2);
-        P.face_area[f] = area;
-        P.face_centroid[f] = c;
+        P.face_area[f] = area_sum;
+        P.face_centroid[f] = (area_sum>0)? (centroid_sum / area_sum) : v0;
+        double L = nsum.norm();
+        P.face_normal[f] = (L>0)? (nsum / L) : Vec3{0,0,1};
     }
+}
+
+// prune faces with area below threshold
+inline void prune_tiny_faces(Polyhedron& P, const Config& cfg){
+    std::vector<std::vector<int>> F2;
+    std::vector<Vec3> N2, C2;
+    std::vector<double> A2;
+    std::vector<int> T2;
+    for(size_t f=0; f<P.F.size(); ++f){
+        if(f < P.face_area.size() && P.face_area[f] < cfg.min_face_area) continue;
+        F2.push_back(std::move(P.F[f]));
+        A2.push_back(f < P.face_area.size()? P.face_area[f] : 0.0);
+        C2.push_back(f < P.face_centroid.size()? P.face_centroid[f] : Vec3{0,0,0});
+        N2.push_back(f < P.face_normal.size()? P.face_normal[f] : Vec3{0,0,1});
+        T2.push_back(f < P.face_tag.size()? P.face_tag[f] : -1);
+    }
+    P.F = std::move(F2);
+    P.face_area = std::move(A2);
+    P.face_centroid = std::move(C2);
+    P.face_normal = std::move(N2);
+    P.face_tag = std::move(T2);
 }
 
 // Build convex polyhedron from intersection of half-spaces n·x <= d
@@ -190,10 +198,33 @@ inline Polyhedron halfspace_intersection(const std::vector<PlaneWithTag>& planes
         P.face_tag.push_back(planes[pi].tag);
     }
     compute_face_attributes(P);
+    prune_tiny_faces(P, cfg);
     return P;
 }
 
-// Volume via face formula: V = (1/3) sum_f A_f * (n_f · c_f), normals assumed outward
+// Volume & centroid via origin-referenced tetrahedra
+inline std::pair<double, Vec3> polyhedron_volume_centroid(const Polyhedron& P){
+    double V = 0.0;
+    Vec3 C{0,0,0};
+    for(const auto& loop : P.F){
+        if(loop.size()<3) continue;
+        const Vec3& v0 = P.V[loop[0]];
+        for(size_t k=1; k+1<loop.size(); ++k){
+            const Vec3& v1 = P.V[loop[k]];
+            const Vec3& v2 = P.V[loop[k+1]];
+            // signed volume of tetra (0,v0,v1,v2)
+            double vol6 = v0.dot( (v1).cross(v2) );
+            double vtet = vol6 / 6.0;
+            V += vtet;
+            C += (v0 + v1 + v2) * (vtet / 4.0);
+        }
+    }
+    double Vabs = std::fabs(V);
+    Vec3 Cfin = (Vabs>0)? (C / V) : Vec3{0,0,0}; // divide by signed V to keep correct sign
+    return {Vabs, Cfin};
+}
+
+// Volume via face formula (kept for reference / debugging)
 inline double polyhedron_volume(const Polyhedron& P){
     double V = 0.0;
     if(P.F.size()!=P.face_area.size() || P.F.size()!=P.face_centroid.size() || P.F.size()!=P.face_normal.size()) return 0.0;

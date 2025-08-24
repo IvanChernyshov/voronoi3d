@@ -14,6 +14,7 @@ struct CellResult {
     int atom_id = -1;
     Polyhedron poly;
     double volume = 0.0;
+    Vec3 centroid{0,0,0};
 };
 
 inline Plane box_plane_x_le(double x){ return Plane{Vec3{1,0,0}, x}; }      // x <= hi
@@ -58,7 +59,9 @@ inline std::vector<CellResult> tessellate_pairs(const BoxContainer& box,
             planes.push_back({Hp, r});
         }
         Polyhedron P = halfspace_intersection(planes, cfg);
-        CellResult C; C.atom_id=i; C.poly = std::move(P); C.volume = polyhedron_volume(C.poly);
+        CellResult C; C.atom_id=i; C.poly = std::move(P);
+        auto [V,Cc] = polyhedron_volume_centroid(C.poly);
+        C.volume = V; C.centroid = Cc;
         out.push_back(std::move(C));
     }
     return out;
@@ -84,8 +87,27 @@ inline std::vector<CellResult> tessellate_pairs(const TriclinicPBC& pbc,
             Plane Hp = from_point_normal(p, n); // keep half-space n·x <= d
             planes.push_back({Hp, r});
         }
-        Polyhedron P = halfspace_intersection(planes, cfg);
-        CellResult C; C.atom_id=i; C.poly = std::move(P); C.volume = polyhedron_volume(C.poly);
+        
+        // Add self-image planes along periodic axes (±1) to ensure closure
+        for(int axis=0; axis<3; ++axis){
+            if(!pbc.periodic[axis]) continue;
+            for(int s : {-1, +1}){
+                Vec3 im = (axis==0? pbc.lat.A.c0 * (double)s
+                         : axis==1? pbc.lat.A.c1 * (double)s
+                                  : pbc.lat.A.c2 * (double)s);
+                double Ls = im.norm();
+                if(Ls==0) continue;
+                Vec3 nself = im / Ls;
+                Vec3 pself = pbc.pos[i] + im * 0.5; // midpoint between atom and its image
+                Plane Hs = from_point_normal(pself, nself); // keep n·x <= d (outside is towards image)
+                int tag = -2000 - axis*2 - (s<0?0:1);
+                planes.push_back({Hs, tag});
+            }
+        }
+Polyhedron P = halfspace_intersection(planes, cfg);
+        CellResult C; C.atom_id=i; C.poly = std::move(P);
+        auto [V,Cc] = polyhedron_volume_centroid(C.poly);
+        C.volume = V; C.centroid = Cc;
         out.push_back(std::move(C));
     }
     return out;
