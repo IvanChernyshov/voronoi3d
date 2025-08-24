@@ -22,7 +22,6 @@ struct NeighborTable {
 inline NeighborTable plan_neighbors(const BoxContainer& box, const Config& cfg){
     NeighborTable T;
     const size_t N = box.pos.size();
-    // naive O(N^2) planning first; can be optimized later with cell lists
     for(size_t ii=0; ii<N; ++ii){
         double R = box.farthest_corner_radius((int)ii);
         double rsearch = (R / std::max(cfg.min_M, 1e-12)) + cfg.neighbor_skin;
@@ -31,7 +30,6 @@ inline NeighborTable plan_neighbors(const BoxContainer& box, const Config& cfg){
             Vec3 d = box.pos[jj] - box.pos[ii];
             double d2 = d.norm2();
             if(d2 <= r2max){
-                // include oriented pair
                 T.i.push_back((int32_t)ii); T.j.push_back((int32_t)jj);
                 T.img.push_back({0,0,0});
                 T.disp.push_back(d);

@@ -9,11 +9,19 @@
 #include "../containers/triclinic_pbc.hpp"
 #include "../core/neighbor.hpp"
 #include "../core/polyhedron.hpp"
-#include "../core/cell_builder.hpp"
-#include "../core/mesh_builder.hpp"
+#include "../core/tessellate.hpp"
 
 namespace py = pybind11;
 using namespace v3d;
+
+static py::array_t<double> vec3_list_to_numpy(const std::vector<Vec3>& V){
+    py::array_t<double> arr({(py::ssize_t)V.size(), (py::ssize_t)3});
+    auto buf = arr.mutable_unchecked<2>();
+    for(py::ssize_t i=0;i<(py::ssize_t)V.size();++i){
+        buf(i,0)=V[i].x; buf(i,1)=V[i].y; buf(i,2)=V[i].z;
+    }
+    return arr;
+}
 
 PYBIND11_MODULE(_core, m) {
     py::class_<Config>(m, "Config")
@@ -61,5 +69,53 @@ PYBIND11_MODULE(_core, m) {
     m.def("plan_neighbors", [](const BoxContainer& box, const Config& cfg){ return plan_neighbors(box, cfg); });
     m.def("plan_neighbors", [](const TriclinicPBC& pbc, const Config& cfg){ return plan_neighbors(pbc, cfg); });
 
-    // tessellate_pairs will be bound once clipping & stitching are finalized.
+    m.def("tessellate_pairs", [](const BoxContainer& box, const NeighborTable& T, py::array_t<double, py::array::c_style | py::array::forcecast> M_arr, const Config& cfg){
+        if(M_arr.ndim()!=1) throw std::runtime_error("M must be a 1D float64 array");
+        if((size_t)M_arr.shape(0) != T.i.size()) throw std::runtime_error("M length must equal neighbor table size");
+        std::vector<double> M(T.i.size());
+        auto Mb = M_arr.unchecked<1>();
+        for(py::ssize_t k=0;k<M_arr.shape(0);++k) M[(size_t)k] = Mb(k);
+        auto cells = tessellate_pairs(box, T, M, cfg);
+        py::list out;
+        for(const auto& c : cells){
+            py::dict d;
+            d["atom_id"] = c.atom_id;
+            d["volume"] = c.volume;
+            d["vertices"] = vec3_list_to_numpy(c.poly.V);
+            py::list faces;
+            for(const auto& loop : c.poly.F){
+                py::list L;
+                for(int idx : loop) L.append(idx);
+                faces.append(L);
+            }
+            d["faces"] = faces;
+            out.append(d);
+        }
+        return out;
+    });
+
+    m.def("tessellate_pairs", [](const TriclinicPBC& pbc, const NeighborTable& T, py::array_t<double, py::array::c_style | py::array::forcecast> M_arr, const Config& cfg){
+        if(M_arr.ndim()!=1) throw std::runtime_error("M must be a 1D float64 array");
+        if((size_t)M_arr.shape(0) != T.i.size()) throw std::runtime_error("M length must equal neighbor table size");
+        std::vector<double> M(T.i.size());
+        auto Mb = M_arr.unchecked<1>();
+        for(py::ssize_t k=0;k<M_arr.shape(0);++k) M[(size_t)k] = Mb(k);
+        auto cells = tessellate_pairs(pbc, T, M, cfg);
+        py::list out;
+        for(const auto& c : cells){
+            py::dict d;
+            d["atom_id"] = c.atom_id;
+            d["volume"] = c.volume;
+            d["vertices"] = vec3_list_to_numpy(c.poly.V);
+            py::list faces;
+            for(const auto& loop : c.poly.F){
+                py::list L;
+                for(int idx : loop) L.append(idx);
+                faces.append(L);
+            }
+            d["faces"] = faces;
+            out.append(d);
+        }
+        return out;
+    });
 }
