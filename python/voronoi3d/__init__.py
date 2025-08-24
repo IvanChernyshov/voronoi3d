@@ -1,3 +1,9 @@
-from ._core import compute_cells, version
+from ._core import (  # type: ignore
+    Config, Vec3, Lattice, BoxBounds, BoxContainer, TriclinicPBC, plan_neighbors
+)
+from .policy import symmetrize_M
 
-__all__ = ["compute_cells", "version"]
+__all__ = [
+    "Config", "Vec3", "Lattice", "BoxBounds", "BoxContainer", "TriclinicPBC",
+    "plan_neighbors", "symmetrize_M",
+]

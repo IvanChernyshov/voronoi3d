@@ -41,10 +41,16 @@ if (OpenMP_CXX_FOUND)
 endif()
 
 pybind11_add_module(_core MODULE
-    cpp/core/bindings.cpp
-    $<TARGET_OBJECTS:voro_dep>
+    cpp/bindings/py_module.cpp
 )
-target_include_directories(_core PRIVATE ${VORO_INCLUDE_DIRS})
+
+# If you still build a voro++ object library, add its objects:
+if (TARGET voro_dep)
+  target_sources(_core PRIVATE $<TARGET_OBJECTS:voro_dep>)
+  target_include_directories(_core PRIVATE ${VORO_INCLUDE_DIRS})
+endif()
+
+target_include_directories(_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cpp)
 target_compile_definitions(_core PRIVATE PYBIND11_DETAILED_ERROR_MESSAGES=1)
 
 install(TARGETS _core DESTINATION voronoi3d)

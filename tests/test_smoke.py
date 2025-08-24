@@ -1,15 +1,14 @@
 import numpy as np
-import math
-import voronoi3d as v3
+import voronoi3d as v3d
 
-def test_basic_two_points_unit_cube():
-    pts = np.array([[0.3, 0.5, 0.5],
-                    [0.7, 0.5, 0.5]], dtype=float)
-    bounds = np.array([[0.0, 1.0],
-                       [0.0, 1.0],
-                       [0.0, 1.0]], dtype=float)
-    out = v3.compute_cells(pts, bounds, grid_divisions=(4,4,4))
-    vols = np.asarray(out["volumes"])
-    assert math.isclose(vols.sum(), 1.0, rel_tol=1e-12, abs_tol=1e-12)
-    assert any(n < 0 for n in out["neighbors"][0])
-    assert any(n < 0 for n in out["neighbors"][1])
+def test_smoke_plan_neighbors():
+    cfg = v3d.Config()
+    cfg.min_M = 0.25
+
+    box = v3d.BoxContainer(v3d.BoxBounds(v3d.Vec3(0,0,0), v3d.Vec3(1,1,1)))
+    box.add_atoms([v3d.Vec3(0.2,0.5,0.5), v3d.Vec3(0.8,0.5,0.5)])
+
+    T = v3d.plan_neighbors(box, cfg)
+    # two atoms → two oriented rows (0→1 and 1→0)
+    assert T.size == 2
+    assert set(zip(T.i, T.j)) == {(0,1), (1,0)}
