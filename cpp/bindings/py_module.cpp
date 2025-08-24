@@ -10,6 +10,7 @@
 #include "../core/neighbor.hpp"
 #include "../core/polyhedron.hpp"
 #include "../core/tessellate.hpp"
+#include "../core/mesh_builder.hpp"
 
 namespace py = pybind11;
 using namespace v3d;
@@ -118,4 +119,69 @@ PYBIND11_MODULE(_core, m) {
         }
         return out;
     });
+
+    m.def("tessellate_pairs_global_mesh", [](const BoxContainer& box, const NeighborTable& T, py::array_t<double, py::array::c_style | py::array::forcecast> M_arr, const Config& cfg){
+        if(M_arr.ndim()!=1) throw std::runtime_error("M must be a 1D float64 array");
+        if((size_t)M_arr.shape(0) != T.i.size()) throw std::runtime_error("M length must equal neighbor table size");
+        std::vector<double> M(T.i.size());
+        auto Mb = M_arr.unchecked<1>();
+        for(py::ssize_t k=0;k<M_arr.shape(0);++k) M[(size_t)k] = Mb(k);
+        auto cells = tessellate_pairs(box, T, M, cfg);
+        // collect polys and ids
+        std::vector<Polyhedron> polys; polys.reserve(cells.size());
+        std::vector<int> atom_ids; atom_ids.reserve(cells.size());
+        std::vector<double> vols; vols.reserve(cells.size());
+        std::vector<Vec3> atom_pos = box.pos;
+        for(const auto& c : cells){ polys.push_back(c.poly); atom_ids.push_back(c.atom_id); vols.push_back(c.volume); }
+        auto GM = stitch_global(T, polys, atom_ids, vols, atom_pos, cfg);
+        // build Python dict
+        py::dict out;
+        out["vertices"] = vec3_list_to_numpy(GM.vertices);
+        // edges
+        py::array_t<int> E_arr({(py::ssize_t)GM.edges.size(), (py::ssize_t)2});
+        auto Eb = E_arr.mutable_unchecked<2>();
+        for(py::ssize_t e=0;e<(py::ssize_t)GM.edges.size();++e){ Eb(e,0)=GM.edges[e][0]; Eb(e,1)=GM.edges[e][1]; }
+        out["edges"] = E_arr;
+        // faces
+        py::list loops;
+        py::array_t<int> Fi({(py::ssize_t)GM.faces.size()});
+        py::array_t<int> Fj({(py::ssize_t)GM.faces.size()});
+        py::array_t<int> Fimg({(py::ssize_t)GM.faces.size(), (py::ssize_t)3});
+        py::array_t<double> Farea({(py::ssize_t)GM.faces.size()});
+        py::array_t<double> Fcent({(py::ssize_t)GM.faces.size(), (py::ssize_t)3});
+        py::array_t<double> Fnorm({(py::ssize_t)GM.faces.size(), (py::ssize_t)3});
+        auto Fi_b=Fi.mutable_unchecked<1>(); auto Fj_b=Fj.mutable_unchecked<1>();
+        auto Fimg_b=Fimg.mutable_unchecked<2>(); auto Farea_b=Farea.mutable_unchecked<1>();
+        auto Fcent_b=Fcent.mutable_unchecked<2>(); auto Fnorm_b=Fnorm.mutable_unchecked<2>();
+        for(py::ssize_t f=0; f<(py::ssize_t)GM.faces.size(); ++f){
+            py::list L;
+            for(int vid : GM.faces[f].loop) L.append(vid);
+            loops.append(L);
+            Fi_b(f) = GM.faces[f].i; Fj_b(f) = GM.faces[f].j;
+            Fimg_b(f,0)=GM.faces[f].img[0]; Fimg_b(f,1)=GM.faces[f].img[1]; Fimg_b(f,2)=GM.faces[f].img[2];
+            Farea_b(f) = GM.faces[f].area;
+            Fcent_b(f,0)=GM.faces[f].centroid.x; Fcent_b(f,1)=GM.faces[f].centroid.y; Fcent_b(f,2)=GM.faces[f].centroid.z;
+            Fnorm_b(f,0)=GM.faces[f].normal_ij.x; Fnorm_b(f,1)=GM.faces[f].normal_ij.y; Fnorm_b(f,2)=GM.faces[f].normal_ij.z;
+        }
+        py::dict Fdict;
+        Fdict["loops"] = loops; Fdict["i"] = Fi; Fdict["j"] = Fj;
+        Fdict["img"] = Fimg; Fdict["area"] = Farea;
+        Fdict["centroid"] = Fcent; Fdict["normal_ij"] = Fnorm;
+        out["faces"] = Fdict;
+        // cells
+        py::array_t<int> Cid({(py::ssize_t)GM.cells.size()});
+        py::array_t<double> Cvol({(py::ssize_t)GM.cells.size()});
+        py::array_t<double> Ccent({(py::ssize_t)GM.cells.size(), (py::ssize_t)3});
+        auto Cid_b=Cid.mutable_unchecked<1>(); auto Cvol_b=Cvol.mutable_unchecked<1>(); auto Ccent_b=Ccent.mutable_unchecked<2>();
+        py::list Cfaces;
+        for(py::ssize_t ci=0; ci<(py::ssize_t)GM.cells.size(); ++ci){
+            Cid_b(ci)=GM.cells[ci].atom_id; Cvol_b(ci)=GM.cells[ci].volume;
+            Ccent_b(ci,0)=GM.cells[ci].centroid.x; Ccent_b(ci,1)=GM.cells[ci].centroid.y; Ccent_b(ci,2)=GM.cells[ci].centroid.z;
+            py::list lf; for(int fid : GM.cells[ci].face_ids) lf.append(fid); Cfaces.append(lf);
+        }
+        py::dict Cdict; Cdict["atom_id"]=Cid; Cdict["volume"]=Cvol; Cdict["centroid"]=Ccent; Cdict["face_ids"]=Cfaces;
+        out["cells"] = Cdict;
+        return out;
+    });
+
 }
